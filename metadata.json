@@ -1,0 +1,7 @@
+{
+  "name": "GovAssist+",
+  "description": "A multilingual AI-powered chatbot for Indian government services.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

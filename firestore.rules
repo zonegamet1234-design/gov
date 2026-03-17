@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required, immutable) - The user's unique ID
+    //   - mobile: string (required, immutable) - The user's mobile number
+    //   - displayName: string (optional) - The user's full name
+    //   - photoURL: string (optional) - The user's profile picture URL
+    //   - role: string (required, enum: ['user', 'admin']) - The user's role
+    //   - createdAt: timestamp (required, immutable) - When the user account was created
+    //   - lastLoginAt: timestamp (required) - When the user last logged in
+    //
+    // ===============================================================
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "varshithpc63@gmail.com" && request.auth.token.email_verified == true));
+    }
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+    function isValidMobile(mobile) {
+      return mobile is string && mobile.matches("^[0-9]{10,15}$");
+    }
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+    
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'mobile', 'displayName', 'photoURL', 'role', 'createdAt', 'lastLoginAt']) &&
+             hasRequiredFields(['uid', 'mobile', 'role', 'createdAt', 'lastLoginAt']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 128 &&
+             data.mobile is string && isValidMobile(data.mobile) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() < 1000 && (data.photoURL == '' || data.photoURL.matches("^https://.*") || data.photoURL.matches("^http://.*")))) &&
+             data.role in ['user', 'admin'] &&
+             data.createdAt is timestamp &&
+             data.lastLoginAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      
+      allow create: if isAuthenticated() && 
+                       isOwner(userId) && 
+                       isValidUser(request.resource.data) && 
+                       uidUnchanged() && 
+                       ((request.resource.data.role == 'user') || isAdmin());
+                       
+      allow update: if isAuthenticated() && 
+                       isOwner(userId) && 
+                       isValidUser(request.resource.data) && 
+                       uidNotModified() && 
+                       areImmutableFieldsUnchanged(['uid', 'mobile', 'createdAt']) &&
+                       ((request.resource.data.role == resource.data.role) || isAdmin());
+                       
+      allow delete: if isAdmin();
+    }
+  }
+}
